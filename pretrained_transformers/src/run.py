@@ -64,7 +64,7 @@ Don't change above here; write your code below
 # note: models should moved to device defined on line 34.
 
 if args.variant == 'vanilla':
-    gpt_model = model.GPT(mconf)
+    model = model.GPT(mconf).to(device)
 elif args.variant == 'perceiver':
     # set mconf.perceiver, and mconf.bottleneck_dim parameters appropriately.
     pass  # [part g] Make some other model here
@@ -130,25 +130,27 @@ elif args.function == 'finetune':
     #     number of epochs for each case.
 
     # part C:
+    name_dataset = dataset.NameDataset(pretrain_dataset, open(args.finetune_corpus_path).read())
     if args.reading_params_path is not None:
-        gpt_model.state_dict(torch.load(args.reading_params_path))
+        model.load_state_dict(torch.load(args.reading_params_path,map_location=device))
     training_config = trainer.TrainerConfig(max_epochs=75,
                                             batch_size=256,
                                             learning_rate=args.finetune_lr,
                                             lr_decay=True,
                                             warmup_tokens=512 * 20,
-                                            final_tokens=200 * len(pretrain_dataset) * block_size,
+                                            final_tokens=200 * len(name_dataset) * block_size,
                                             num_workers=4,
                                             writer=writer)
-    coach = trainer.Trainer(gpt_model, pretrain_dataset, None, training_config)
+    coach = trainer.Trainer(model, name_dataset, None, training_config)
     coach.train()
-    torch.save(gpt_model.state_dict(), args.writing_params_path)
+    torch.save(model.state_dict(), args.writing_params_path)
 
 elif args.function == 'evaluate':
     assert args.outputs_path is not None
     assert args.reading_params_path is not None
     assert args.eval_corpus_path is not None
     model.load_state_dict(torch.load(args.reading_params_path))
+    model = model.to(device)
     correct = 0
     total = 0
     with open(args.outputs_path, 'w', encoding='utf-8') as fout:
