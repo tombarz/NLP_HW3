@@ -6,6 +6,7 @@ from torch.nn import functional as F
 from torch.utils.tensorboard import SummaryWriter
 import random
 import argparse
+
 random.seed(0)
 
 import dataset
@@ -13,14 +14,13 @@ import model
 import trainer
 import utils
 
-
 argp = argparse.ArgumentParser()
 argp.add_argument('function', help="Choose pretrain, finetune, or evaluate")
-argp.add_argument('variant', help="Choose vanilla or perceiver") 
+argp.add_argument('variant', help="Choose vanilla or perceiver")
 argp.add_argument('--bottleneck_dim', type=int, default=32)
 argp.add_argument('pretrain_corpus_path', default=None)
-argp.add_argument('--reading_params_path',default=None)
-argp.add_argument('--writing_params_path',default=None)
+argp.add_argument('--reading_params_path', default=None)
+argp.add_argument('--writing_params_path', default=None)
 argp.add_argument('--finetune_corpus_path', default=None)
 argp.add_argument('--eval_corpus_path', default=None)
 argp.add_argument('--outputs_path', default=None)
@@ -54,7 +54,7 @@ pretrain_dataset = dataset.CharCorruptionDataset(text, block_size)
 # We don't suggest you change these hyperparameters, as they're known to work.
 # use them for both the vanilla and the perceiver models
 mconf = model.GPTConfig(pretrain_dataset.vocab_size, pretrain_dataset.block_size,
-    n_layer=4, n_head=8, n_embd=256)
+                        n_layer=4, n_head=8, n_embd=256)
 
 """
 Don't change above here; write your code below
@@ -64,10 +64,10 @@ Don't change above here; write your code below
 # note: models should moved to device defined on line 34.
 
 if args.variant == 'vanilla':
-    pass # [part c] Make some model here
+    gpt_model = model.GPT(mconf)
 elif args.variant == 'perceiver':
     # set mconf.perceiver, and mconf.bottleneck_dim parameters appropriately.
-    pass # [part g] Make some other model here
+    pass  # [part g] Make some other model here
 else:
     raise ValueError("Unknown model variant")
 
@@ -81,7 +81,7 @@ if args.function == 'pretrain':
     # - Goals:
     #     1. Pretrain the model on this corpus
     #     2. Save the resulting model in args.writing_params_path
-    
+
     # - Make sure to use the following hyperparameters for pretraining:
     # Hyperparameters for pretraining:
     # max_epochs=650
@@ -128,8 +128,22 @@ elif args.function == 'finetune':
     #         writer=writer
     #     You can use the args.reading_params_path flag to switch between the
     #     number of epochs for each case.
-     
-    raise NotImplementedError
+
+    # part C:
+    if args.reading_params_path is not None:
+        gpt_model.state_dict(torch.load(args.reading_params_path))
+    training_config = trainer.TrainerConfig(max_epochs=75,
+                                            batch_size=256,
+                                            learning_rate=args.finetune_lr,
+                                            lr_decay=True,
+                                            warmup_tokens=512 * 20,
+                                            final_tokens=200 * len(pretrain_dataset) * block_size,
+                                            num_workers=4,
+                                            writer=writer)
+    coach = trainer.Trainer(gpt_model, pretrain_dataset, None, training_config)
+    coach.train()
+    torch.save(gpt_model.state_dict(), args.writing_params_path)
+
 elif args.function == 'evaluate':
     assert args.outputs_path is not None
     assert args.reading_params_path is not None
@@ -142,7 +156,7 @@ elif args.function == 'evaluate':
         for line in tqdm(open(args.eval_corpus_path, encoding='utf-8')):
             x = line.split('\t')[0]
             x = x + '⁇'
-            x = torch.tensor([pretrain_dataset.stoi[s] for s in x], dtype=torch.long)[None,...].to(device)
+            x = torch.tensor([pretrain_dataset.stoi[s] for s in x], dtype=torch.long)[None, ...].to(device)
             pred = utils.sample(model, x, 32, sample=False)[0]
             completion = ''.join([pretrain_dataset.itos[int(i)] for i in pred])
             pred = completion.split('⁇')[1]
@@ -150,8 +164,7 @@ elif args.function == 'evaluate':
             fout.write(pred + '\n')
         total, correct = utils.evaluate_places(args.eval_corpus_path, predictions)
     if total > 0:
-      print('Correct: {} out of {}: {}%'.format(correct, total, correct/total*100))
+        print('Correct: {} out of {}: {}%'.format(correct, total, correct / total * 100))
     else:
         print('Predictions written to {}; no targets provided'
-                .format(args.outputs_path))
-
+              .format(args.outputs_path))
